@@ -1,0 +1,43 @@
+esphome:
+  name: lin-test
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+external_components:
+  - source: github://swifty99/linbus
+    components: [linbus]
+
+linbus:
+  id: lin_master
+  tx_pin: GPIO10
+  rx_pin: GPIO6
+  cs_pin: GPIO7
+  baud_rate: 19200
+  uart_port: UART_NUM_1
+  mode: master
+  schedule:
+    - lin_id: 33
+      interval: 200ms
+  responses:
+    - lin_id: 33
+      data: [0x00, 0x00, 0x00, 0x00]
+      checksum: enhanced
+  on_frame:
+    - lin_id: 33
+      then:
+        - lambda: |-
+            ESP_LOGD("linbus", "Got %d bytes for id 33", data_length);
+
+sensor:
+  - platform: linbus
+    linbus_id: lin_master
+    bus_load:
+      name: "LIN Bus Load"
+    error_rate:
+      name: "LIN Bus Error Rate"
