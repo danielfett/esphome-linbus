@@ -4,11 +4,8 @@ A LIN (Local Interconnect Network) bus component for ESPHome, for communicating 
 
 **Platform:** ESP32 family only (ESP-IDF framework). Validated on ESP32-C3.
 
-## Status
-
-**v2** — rewrite from scratch. Previous versions are discarded and not backward-compatible (YAML key, action names, and internal API all changed).
-
-The implementation lives upstream on the [`lin_bus` branch of swifty99/esphome](https://github.com/swifty99/esphome/tree/lin_bus) and is mirrored here as an [ESPHome external component](https://esphome.io/components/external_components/) so you can use it without building from a fork.
+> [!IMPORTANT]
+> This is a fork of [swifty99/linbus](https://github.com/swifty99/linbus) to fix a bug and enable some features that I needed for my project. The plan is to send these changes upstream at some point.
 
 ## Installation
 
