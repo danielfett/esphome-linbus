@@ -73,8 +73,13 @@ esp_err_t LINCommunication::init(lin_mode_t mode, int baud_rate) {
       return ESP_FAIL;
     }
   }
-  // Approx 3 byte times (10 bits/byte). 3 * 10 * 1e6 / baud
-  inter_byte_timeout_us_ = (uint32_t) ((3ULL * 10ULL * 1000000ULL) / (uint32_t) baud_rate_);
+  // The sendBreak() implementation uses half-baud-rate UART to produce the break field.
+  // After uart_wait_tx_done() returns, uart_set_baudrate() is called, followed by the
+  // sync and PID bytes.  Due to OS scheduling and baud-rate switching overhead the gap
+  // between the break echo (0x00) and the sync echo (0x55) can exceed 9 ms in practice.
+  // The timeout must be longer than this gap; 20 ms is comfortably above the observed
+  // worst-case while still being much shorter than the minimum inter-frame space (2 s).
+  inter_byte_timeout_us_ = 20000;  // 20 ms
 
   ESP_LOGI(TAG, "LINCommunication initialized in mode %d at %d baud", mode_, baud_rate_);
   is_initialized_ = true;  // Mark as initialized
@@ -92,11 +97,19 @@ void LINCommunication::uart_event_task_trampoline(void *arg) {
   uart_event_t evt;
   uint8_t buf[32];
 
-  // Convert desired microsecond inter-byte timeout to FreeRTOS ticks (at least 1 tick)
-  TickType_t wait_ticks = pdMS_TO_TICKS((self->inter_byte_timeout_us_ + 999) / 1000  // round up to ms
-  );
+  // Convert inter-byte timeout to FreeRTOS ticks.
+  // Enforce a minimum of 10 ms: pdMS_TO_TICKS rounds down, and tick-boundary
+  // alignment can halve the effective wait (e.g. at 1000 Hz, pdMS_TO_TICKS(2)=2
+  // ticks but the actual wait can be as short as 1 ms — dangerously close to the
+  // 520 µs inter-byte gap at 19200 baud).  10 ms is safely above any inter-byte
+  // gap while still far below any inter-frame gap.
+  uint32_t timeout_ms = (self->inter_byte_timeout_us_ + 999) / 1000;
+  if (timeout_ms < 10)
+    timeout_ms = 10;
+  TickType_t wait_ticks = pdMS_TO_TICKS(timeout_ms);
   if (wait_ticks == 0)
     wait_ticks = 1;
+
 
   for (;;) {
     // Wait for UART event OR timeout (idle gap)

@@ -2,6 +2,7 @@
 // Third-Party Library Headers
 #include "LinSerial.h"  // Explicit include for LinSerial
 #include "LinCommon.h"  // Explicit include for shared constants
+#include "esphome/core/log.h"  // must come before esp_log.h to redirect ESP_LOG* through ESPHome
 #include "esp_log.h"    // Explicit include for ESP_LOG* macros
 #include "esp_timer.h"  // Explicit include for esp_timer_get_time()
 #include <cstring>      // For memset
@@ -68,12 +69,24 @@ void LinProtocolHandler::onData(uint8_t pid, const uint8_t *data, size_t len) {
   if (len == 0 || len > 16)
     return;
 
+  uint8_t id = pid & 0x3F;
+
+  // For master-publish frames we are the publisher: skip echo validation.
+  // The echo arrives byte-by-byte and the inter-byte timeout often fires before
+  // all bytes are received, causing spurious checksum errors against the partial frame.
+  for (size_t i = 0; i < LIN_MAX_RESPONSES; ++i) {
+    if (responses_[i].id == id && responses_[i].dataLength) {
+      ESP_LOGD(TAG, "Skipping echo for master-publish ID 0x%02X", id);
+      return;
+    }
+  }
+
   // Update statistics - data received
   statistics_.data_bytes_received += len;
   statistics_.total_bus_bytes += len;
 
   // Track unique IDs
-  uint8_t id = pid & 0x3F;
+  // id already extracted above
   if (!(unique_id_tracker_[id / 8] & (1 << (id % 8)))) {
     unique_id_tracker_[id / 8] |= (1 << (id % 8));
     statistics_.unique_ids_seen++;
@@ -88,7 +101,6 @@ void LinProtocolHandler::onData(uint8_t pid, const uint8_t *data, size_t len) {
     return;
   }
 
-  // id already declared above - reuse it
   int oldest_idx = -1;
   int64_t oldest_time = INT64_MAX;
 
@@ -215,6 +227,7 @@ void LinProtocolHandler::onInterByteTimeout() {
       onData(currentPIDWithParity_, currentData_, currentDataCount_);
     }
     resetDecodeState();
+    ESP_LOGD(TAG, "Inter-byte timeout: resetting state machine");
   }
 }
 
@@ -253,8 +266,7 @@ IRAM_ATTR lin_read_state_t LinProtocolHandler::receiveDecode(uint8_t readbyte, u
         // Immediately transmit response (first data byte timing critical)
         onID(id);
 
-        // log received ID req
-        ESP_LOGD(TAG, "RX ID req: 0x%02X", id);
+        ESP_LOGD(TAG, "RX ID req: 0x%02X (PID=0x%02X) -> entering DATA", id, pid);
 
         // Enter data phase to capture response (including our own echo HW loops back)
         currentDataCount_ = 0;
